@@ -3,9 +3,8 @@ data/raw/*.csv
 data/raw/*.json
 data/processed/*
 
-# Power BI (dashboard/Personal_Finance_Analytics.pbix is intentionally
-# tracked as a portfolio deliverable and predates this rule; this only
-# blocks *new* .pbix files from being added accidentally)
+# Power BI (dashboard/Personal_Finance_Analytics.pbix is 317MB, over
+# GitHub's 100MB hard limit -- kept out of git entirely, see dashboard/README.md)
 *.pbix
 
 # PostgreSQL

@@ -9,6 +9,16 @@ Power BI Desktop file for this project. It connects to the
 `finance_analytics` PostgreSQL database built by the scripts in
 [`/sql`](../sql).
 
+## Getting the .pbix file
+
+`Personal_Finance_Analytics.pbix` is **317MB** — over GitHub's 100MB hard
+per-file limit — so it is excluded from git (`*.pbix` in `.gitignore`) and
+is not part of this repository's history. The screenshots in
+[`../screenshots/`](../screenshots/) and the write-up in
+[`../docs/15_Dashboard_Documentation.md`](../docs/15_Dashboard_Documentation.md)
+cover what the dashboard looks like and how it behaves without needing the
+file itself.
+
 ## Status
 
 - [x] `.pbix` file built
