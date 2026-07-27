@@ -1,0 +1,226 @@
+// ============================================================
+// Card Transaction & Merchant Analytics — Data Warehouse
+// DBML Schema — import at https://dbdiagram.io
+//
+// Source of truth: sql/01_ddl/01_staging_tables.sql,
+// sql/01_ddl/02_star_schema.sql, sql/08_triggers/01_triggers.sql
+//
+// Layers, top to bottom: Staging -> Dimensions -> Fact -> Audit
+// ============================================================
+
+// ------------------------------------------------------------
+// STAGING LAYER
+// Untyped, unconstrained 1:1 landing zone for the raw CSVs.
+// No FKs here by design — staging must never reject a row the
+// source system produced; typing/validation happens on promotion
+// into the star schema, not on load into staging.
+// ------------------------------------------------------------
+
+Table stg_users {
+  id integer [pk, note: 'Natural key from users_data.csv (becomes dim_users.user_id unchanged)']
+  current_age integer
+  retirement_age integer
+  birth_year integer
+  birth_month integer
+  gender text
+  address text
+  latitude "numeric(9,6)"
+  longitude "numeric(9,6)"
+  per_capita_income text [note: 'Raw currency string, e.g. "$45,000.00" — cast to numeric on dim load']
+  yearly_income text
+  total_debt text
+  credit_score integer
+  num_credit_cards integer
+
+  Note: '''
+  STAGING — Grain: 1 row = 1 source user record.
+  Currency fields kept as TEXT so COPY never fails on formatting.
+  '''
+}
+
+Table stg_cards {
+  id integer [pk, note: 'Natural key from cards_data.csv (becomes dim_cards.card_id unchanged)']
+  client_id integer [not null, note: 'FK to stg_users.id — not enforced in staging by design']
+  card_brand text
+  card_type text
+  card_number text [note: 'Full PAN as sourced — never promoted past staging; dim_cards stores a masked value only']
+  expires text
+  cvv text [note: 'Sensitive — staging-only, dropped entirely before promotion to dim_cards']
+  has_chip text [note: '"YES"/"NO" string, cast to boolean on dim load']
+  num_cards_issued integer
+  credit_limit text
+  acct_open_date text [note: '"MM/YYYY" string, parsed with TO_DATE on dim load']
+  year_pin_last_changed integer
+  card_on_dark_web text [note: 'Sourced but not currently promoted to dim_cards']
+
+  Note: '''
+  STAGING — Grain: 1 row = 1 source card record.
+  '''
+}
+
+Table stg_transactions {
+  id bigint [pk, note: 'Natural key from transactions_data.csv (becomes fact_transactions.transaction_id unchanged)']
+  date timestamp [not null]
+  client_id integer [not null]
+  card_id integer [not null]
+  amount text [not null, note: 'Raw signed currency string; REGEXP_REPLACE + cast to numeric on fact load']
+  use_chip text
+  merchant_id bigint [not null]
+  merchant_city text
+  merchant_state text [note: 'NULL for online transactions — see fact load join note']
+  zip text [note: 'NULL for online transactions — see fact load join note']
+  mcc text
+  errors text
+
+  Note: '''
+  STAGING — Grain: 1 row = 1 source transaction record (~13.3M rows).
+  '''
+}
+
+// ------------------------------------------------------------
+// DIMENSION LAYER
+// Conformed, typed, query-ready dimensions. Type-1 (overwrite)
+// — no history tracked; see Design Decisions doc for the SCD
+// trade-off this implies.
+// ------------------------------------------------------------
+
+Table dim_users {
+  user_id integer [pk, note: 'Same value as stg_users.id — no surrogate generated, natural key is stable and already unique']
+  current_age integer
+  retirement_age integer
+  birth_year integer
+  birth_month integer
+  gender text
+  address text
+  latitude "numeric(9,6)"
+  longitude "numeric(9,6)"
+  per_capita_income "numeric(12,2)"
+  yearly_income "numeric(12,2)"
+  total_debt "numeric(12,2)"
+  credit_score integer
+  num_credit_cards integer
+
+  Note: '''
+  DIMENSION — Grain: 1 row = 1 user (~2,000 rows).
+  Type-1 (overwrite): no history of income/credit-score changes is kept.
+  '''
+}
+
+Table dim_cards {
+  card_id integer [pk, note: 'Same value as stg_cards.id']
+  user_id integer [ref: > dim_users.user_id, not null]
+  card_brand text
+  card_type text
+  card_number_masked text [note: 'Derived as XXXX-XXXX-XXXX-<last 4> — full PAN never leaves staging']
+  expires text
+  has_chip boolean
+  num_cards_issued integer
+  credit_limit "numeric(12,2)"
+  acct_open_date date
+  year_pin_last_changed integer
+
+  Note: '''
+  DIMENSION — Grain: 1 row = 1 physical card (~6,146 rows).
+  One user issues many cards -> 1:N to dim_users.
+  '''
+}
+
+Table dim_mcc {
+  mcc text [pk]
+  description text [not null]
+
+  Note: '''
+  DIMENSION — Grain: 1 row = 1 Merchant Category Code (~109 rows).
+  Static conformed lookup, loaded from mcc_codes.json. Stands in for
+  a curated category/subcategory dimension (none exists in source data).
+  '''
+}
+
+Table dim_merchant {
+  merchant_key integer [pk, increment, note: 'Surrogate key — merchant_id alone is not unique across locations']
+  merchant_id bigint [not null, note: 'Natural merchant id from source']
+  merchant_city text
+  merchant_state text [note: 'NULL for online/card-not-present merchants']
+  zip text [note: 'NULL for online/card-not-present merchants']
+
+  Note: '''
+  DIMENSION — Grain: 1 row = 1 distinct (merchant_id, city, state, zip)
+  combination. A surrogate key is required because the same merchant_id
+  recurs across multiple physical locations in the source data — the
+  true natural key is the 4-column composite, not merchant_id alone.
+  '''
+}
+
+// ------------------------------------------------------------
+// FACT LAYER
+// ------------------------------------------------------------
+
+Table fact_transactions {
+  transaction_id bigint [pk, note: 'Same value as stg_transactions.id']
+  txn_date timestamp [not null]
+  user_id integer [ref: > dim_users.user_id, not null]
+  card_id integer [ref: > dim_cards.card_id, not null]
+  merchant_key integer [ref: > dim_merchant.merchant_key]
+  mcc text [ref: > dim_mcc.mcc]
+  amount "numeric(12,2)" [not null, note: 'Signed additive measure — positive = spend, negative = refund']
+  use_chip text [note: 'Degenerate dimension: Swipe / Chip / Online Transaction']
+  errors text [note: 'Degenerate dimension: transaction error/decline reason, if any']
+
+  Note: '''
+  FACT (transaction grain) — Grain: 1 row = 1 card transaction (~13.3M rows).
+  Only additive measure is amount. use_chip and errors are degenerate
+  dimensions kept on the fact row rather than broken into their own
+  dimension tables, since they carry no further descriptive attributes.
+  '''
+}
+
+// ------------------------------------------------------------
+// AUDIT / OPERATIONAL LAYER
+// ------------------------------------------------------------
+
+Table audit_log {
+  audit_id bigint [pk, increment]
+  transaction_id bigint [note: 'Logical reference to fact_transactions.transaction_id — see Improvements: not yet a DB-enforced FK']
+  action_type text [note: 'Populated from TG_OP (e.g. INSERT) by trg_transaction_audit']
+  action_time timestamp [default: `CURRENT_TIMESTAMP`]
+
+  Note: '''
+  AUDIT — Grain: 1 row = 1 INSERT event on fact_transactions, written by
+  the AFTER INSERT trigger trg_transaction_audit / fn_transaction_audit.
+  '''
+}
+
+// ------------------------------------------------------------
+// RELATIONSHIPS NOT EXPRESSED VIA INLINE ref (see notes above)
+// ------------------------------------------------------------
+
+// Logical only — audit_log.transaction_id has no REFERENCES clause
+// in the current DDL (sql/08_triggers/01_triggers.sql). Included here
+// so the diagram reflects the intended lineage; flagged as a gap in
+// the Improvements section of docs/14_ER_Diagram_and_Architecture.md.
+Ref: audit_log.transaction_id > fact_transactions.transaction_id
+
+// ------------------------------------------------------------
+// LAYOUT GROUPS
+// ------------------------------------------------------------
+
+TableGroup "01 - Staging" {
+  stg_users
+  stg_cards
+  stg_transactions
+}
+
+TableGroup "02 - Dimensions" {
+  dim_users
+  dim_cards
+  dim_mcc
+  dim_merchant
+}
+
+TableGroup "03 - Fact" {
+  fact_transactions
+}
+
+TableGroup "04 - Audit" {
+  audit_log
+}
