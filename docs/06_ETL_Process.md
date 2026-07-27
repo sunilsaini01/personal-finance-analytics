@@ -4,7 +4,7 @@
 
 ---
 
-> **Correction notice:** an earlier version of this document referenced a folder structure (`02_cleaning/`, `03_dimension_loading/`, `04_validation/`) that doesn't match the actual repository. The real structure is documented below and matches `sql/` exactly.
+> **Update notice:** an earlier version of this document referenced a folder structure (`02_cleaning/`, `03_dimension_loading/`, `04_validation/`) that didn't match the repository at the time, and was corrected to describe `sql/` as it actually existed. `sql/02_cleaning/` has since been added for real — see Step 3 below — so this notice is now historical, not a live discrepancy.
 
 ## Purpose
 
@@ -19,10 +19,10 @@ Raw CSV/JSON Files (data/raw/)
 Extract → Staging Tables (sql/01_ddl/01_staging_tables.sql)
       │
       ▼
-Transform → Cleaning & Typing (currency casts, date parsing, PAN masking)
+Clean → Currency Casting (sql/02_cleaning/01_clean_currency_fields.sql)
       │
       ▼
-Load → Dimension Tables (sql/03_load/01_load_dimensions.sql)
+Load → Dimension Tables (sql/03_load/01_load_dimensions.sql — date parsing, PAN masking)
       │
       ▼
 Load → Fact Table (sql/03_load/02_load_transactions.sql)
@@ -52,42 +52,42 @@ Source files, imported without modification:
 
 **Purpose:** preserve the original data untouched, guarantee the raw load never fails on formatting, and separate raw data from reporting tables. Columns that are numeric/date/boolean in the target schema are kept as `TEXT` in staging specifically because a `COPY` into a typed column fails the entire batch on the first malformed value (e.g., `"$1,234.56"` into `NUMERIC`).
 
-## Step 3 — Data Cleaning & Transformation
+## Step 3 — Data Cleaning (Currency Fields)
 
-Performed in `sql/03_load/01_load_dimensions.sql` and `02_load_transactions.sql`:
-
-**Monetary values** — currency symbols stripped and cast to `NUMERIC(12,2)`:
+Performed in `sql/02_cleaning/01_clean_currency_fields.sql`, which sits between staging and load: three views (`vw_stg_users_clean`, `vw_stg_cards_clean`, `vw_stg_transactions_clean`) select every staging column unchanged except the monetary ones, which are cast from `TEXT` to `NUMERIC(12,2)`:
 
 ```sql
-REPLACE(per_capita_income, '$', '')::NUMERIC
+REPLACE(per_capita_income, '$', '')::NUMERIC(12,2)
 ```
 
 Transaction amounts additionally use `REGEXP_REPLACE` to handle the signed (`-$12.34`-style) format:
 
 ```sql
-REGEXP_REPLACE(amount, '[^0-9.-]', '', 'g')::NUMERIC
+REGEXP_REPLACE(amount, '[^0-9.-]', '', 'g')::NUMERIC(12,2)
 ```
 
-**Boolean fields** — `has_chip` cast from `"YES"`/`"NO"` text to `BOOLEAN`.
+`sql/03_load/*.sql` selects `FROM` these views instead of the raw `stg_*` tables, so the dimension/fact load reads already-typed amounts rather than repeating the cast inline. The other cleaning steps stay inline in the load scripts, next to the table they type:
 
-**Date fields** — `acct_open_date` parsed from `"MM/YYYY"` text via `TO_DATE(acct_open_date, 'MM/YYYY')`.
+**Boolean fields** — `has_chip` cast from `"YES"`/`"NO"` text to `BOOLEAN` (`sql/03_load/01_load_dimensions.sql`).
 
-**PII/security hygiene** — card PAN reduced to a masked last-4 value (`'XXXX-XXXX-XXXX-' || RIGHT(card_number, 4)`); CVV dropped entirely and never promoted past `stg_cards`.
+**Date fields** — `acct_open_date` parsed from `"MM/YYYY"` text via `TO_DATE(acct_open_date, 'MM/YYYY')` (`sql/03_load/01_load_dimensions.sql`).
 
-**Merchant de-duplication** — `dim_merchant` is populated via `SELECT DISTINCT merchant_id, merchant_city, merchant_state, zip FROM stg_transactions`, which is what establishes the surrogate `merchant_key`.
+**PII/security hygiene** — card PAN reduced to a masked last-4 value (`'XXXX-XXXX-XXXX-' || RIGHT(card_number, 4)`); CVV dropped entirely and never promoted past `stg_cards` (`sql/03_load/01_load_dimensions.sql`).
+
+**Merchant de-duplication** — `dim_merchant` is populated via `SELECT DISTINCT merchant_id, merchant_city, merchant_state, zip FROM stg_transactions`, which is what establishes the surrogate `merchant_key` (`sql/03_load/01_load_dimensions.sql`).
 
 ## Step 4 — Dimension Load
 
-`sql/03_load/01_load_dimensions.sql` populates `dim_users`, `dim_cards`, `dim_merchant` (in that order — `dim_cards` depends on `dim_users` existing for its FK, and the fact load depends on `dim_merchant` existing for its join). `dim_mcc` is populated separately by `scripts/load_mcc.py` from `mcc_codes.json`.
+`sql/03_load/01_load_dimensions.sql` populates `dim_users`, `dim_cards`, `dim_merchant` (in that order — `dim_cards` depends on `dim_users` existing for its FK, and the fact load depends on `dim_merchant` existing for its join), reading `dim_users`/`dim_cards` source rows from `vw_stg_users_clean`/`vw_stg_cards_clean` rather than the raw staging tables. `dim_mcc` is populated separately by `scripts/load_mcc.py` from `mcc_codes.json`.
 
 ## Step 5 — Fact Load
 
-`sql/03_load/02_load_transactions.sql` populates `fact_transactions` by joining `stg_transactions` to `dim_merchant` on `merchant_id` plus city/state/zip.
+`sql/03_load/02_load_transactions.sql` populates `fact_transactions` by joining `vw_stg_transactions_clean` to `dim_merchant` on `merchant_id` plus city/state/zip.
 
 **A specific, important detail:** this join uses `IS NOT DISTINCT FROM` rather than `=` on the nullable `merchant_city`/`merchant_state`/`zip` columns:
 
 ```sql
-FROM stg_transactions t
+FROM vw_stg_transactions_clean t
 JOIN dim_merchant dm
     ON t.merchant_id = dm.merchant_id
    AND t.merchant_city IS NOT DISTINCT FROM dm.merchant_city
