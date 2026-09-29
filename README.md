@@ -1,3 +1,5 @@
+# Personal Finance Analytics
+
 <div align="center">
 
 <img src="assets/banner.svg" alt="Card Transaction & Merchant Analytics banner" width="100%"/>
@@ -10,6 +12,9 @@
 
 *13.3M+ credit-card transactions, modeled as a governed star schema and delivered through a three-page executive dashboard.*
 
+**Created by Sunil Kumar**  
+[GitHub](https://github.com/sunilsaini01) | [LinkedIn](https://www.linkedin.com/in/sunil-kumar0001/) | [Kaggle](https://www.kaggle.com/sunil123kumar)
+
 </div>
 
 ---
@@ -17,11 +22,13 @@
 ## Contents
 
 1. [Project Overview](#1-project-overview) · 2. [Architecture](#2-architecture) · 3. [Dashboard](#3-dashboard) · 4. [Tech Stack](#4-tech-stack) · 5. [Folder Structure](#5-folder-structure) · 6. [Database Schema](#6-database-schema) · 7. [ETL Workflow](#7-etl-workflow) · 8. [Business Questions Solved](#8-business-questions-solved) · 9. [KPIs](#9-kpis) · 10. [Dashboard Pages](#10-dashboard-pages)
-11. [Installation](#11-installation-guide) · 12. [Running the Project](#12-running-the-project) · 13. [SQL Scripts](#13-sql-scripts) · 14. [Power BI Setup](#14-power-bi-setup) · 15. [Documentation Links](#15-documentation-links) · 16. [Future Improvements](#16-future-improvements) · 17. [Lessons Learned](#17-lessons-learned) · [Community](#community--contributing) · 18. [Acknowledgements](#18-acknowledgements) · 19. [License](#19-license)
+11. [Installation](#11-installation-guide) · 12. [Running the Project](#12-running-the-project) · 13. [SQL Scripts](#13-sql-scripts) · 14. [Power BI Setup](#14-power-bi-setup) · 15. [Documentation Links](#15-documentation-links) · 16. [Future Improvements](#16-future-improvements) · 17. [Lessons Learned](#17-lessons-learned) · [Community](#community--contributing) · 18. [Acknowledgements](#18-acknowledgements) · [Author](#author) · 19. [License](#19-license)
 
 ---
 
 ## 1. Project Overview
+
+**Focus: Card Transaction & Merchant Analytics.** Built by **Sunil Kumar** using PostgreSQL, SQL, Python, and Power BI. Explore the [GitHub repository](https://github.com/sunilsaini01/personal-finance-analytics).
 
 This project turns a raw, 13.3-million-row credit-card transaction dataset into a governed PostgreSQL data warehouse and a three-page Power BI dashboard. It answers the questions a merchant-analytics or card-operations team actually asks: where does spend concentrate, who are the highest-value customers, which payment channels dominate, and how reliable is the transaction pipeline itself.
 
@@ -67,7 +74,7 @@ Three Power BI pages, each built for a different audience. Full visual-by-visual
 |---|---|---|
 | Database | PostgreSQL | Free, industry-standard, strong window-function support |
 | Modeling | Star schema (Kimball) | Shallow joins, predictable BI-tool performance |
-| ETL / Transform | SQL (staging → load scripts), Python (`pandas`, for `scripts/load_mcc.py`) | No external orchestration needed at this data volume |
+| ETL / Transform | SQL (staging → load scripts), Python (`psycopg2`, for `scripts/load_mcc.py`) | No external orchestration needed at this data volume |
 | BI / Dashboard | Power BI Desktop | Industry-standard, free, recruiter-recognized |
 | Diagramming | dbdiagram.io (DBML) + Mermaid | Importable ERD + GitHub-native rendering |
 | Version Control | Git + GitHub | Commit history as evidence of process |
@@ -81,7 +88,7 @@ Three Power BI pages, each built for a different audience. Full visual-by-visual
 personal-finance-analytics/
 ├── README.md                     # this file
 ├── LICENSE                       # MIT
-├── data/raw/                     # source CSV/JSON (see §9 for what's actually used)
+├── data/raw/                     # source CSV/JSON (download separately; see section 11)
 ├── dashboard/
 │   ├── Personal_Finance_Analytics.pbix
 │   └── README.md
@@ -142,7 +149,7 @@ See [`docs/14_ER_Diagram_Architecture.md`](docs/14_ER_Diagram_Architecture.md) f
 data/raw/*.csv, mcc_codes.json
         │
         ▼
-Staging (stg_users, stg_cards, stg_transactions) — untyped, 1:1 mirror of source
+Staging (stg_users, stg_cards, stg_transactions) - monetary fields retained as TEXT
         │
         ▼
 Cleaning & typing — strip currency symbols, cast TEXT→NUMERIC/DATE/BOOLEAN, mask card PAN to last 4
@@ -174,7 +181,7 @@ The full traceability matrix (which question is answered, by which script, and w
 - Who are the highest-spending customers, and how should they be segmented?
 - What does month-over-month and year-over-year spend growth look like?
 - What share of transactions fail, and for what reasons?
-- How is revenue distributed geographically?
+- How is card spend distributed geographically?
 
 ---
 
@@ -184,10 +191,11 @@ Full catalog with formulas and business rationale: [`docs/09_KPI_Definitions.md`
 
 | KPI | Formula |
 |---|---|
-| Total Revenue | `SUM(amount)` |
+| Gross Spend | `SUM(amount)` for positive amounts |
+| Refunds | `SUM(ABS(amount))` for negative amounts |
 | Net Spend | `Total Spend − Total Refunds` |
 | Average Transaction Value | `SUM(amount) / COUNT(transaction_id)` |
-| Revenue Growth (MoM/YoY) | `(Current − Previous) / Previous × 100` |
+| Spend Growth (MoM/YoY) | `(Current − Previous) / Previous × 100` |
 | Category / Merchant / Payment-Method Contribution % | `Segment Spend / Total Spend` |
 | Rolling Average | `AVG(revenue) OVER (moving window)` |
 
@@ -212,13 +220,25 @@ Full page-by-page breakdown (business objective, every visual explained, insight
 **Prerequisites:** PostgreSQL 14+, `psql` or a GUI client (DBeaver/pgAdmin), Power BI Desktop (Windows), Python 3.9+ (only needed for `scripts/load_mcc.py`).
 
 ```bash
-# 1. Create the database
-createdb finance_analytics
-
-# 2. Clone the repo and cd into it
-git clone <this-repo-url>
+git clone https://github.com/sunilsaini01/personal-finance-analytics.git
 cd personal-finance-analytics
+python -m pip install psycopg2-binary
+createdb -U postgres finance_analytics
 ```
+
+**Source files are not included.** Create `data/raw/` and place `users_data.csv`, `cards_data.csv`, `transactions_data.csv`, and `mcc_codes.json` there. The MCC file must be a JSON object mapping codes to descriptions. The project documents a synthetic Kaggle dataset with approximately 13.3 million transactions, 2,000 users, and 6,146 cards; the exact dataset download URL is not recorded. See the [dataset description](docs/03_Dataset_Description.md) and [staging definitions](sql/01_ddl/01_staging_tables.sql) for the expected structure and CSV column order.
+
+Configure your PostgreSQL connection before running the loader. For PowerShell:
+
+```powershell
+$env:PGHOST = "localhost"
+$env:PGDATABASE = "finance_analytics"
+$env:PGUSER = "postgres"
+$credential = Get-Credential -UserName postgres -Message "Enter your local PostgreSQL password"
+$env:PGPASSWORD = $credential.GetNetworkCredential().Password
+```
+
+The Python loader requires `PGPASSWORD` and reads the other three variables shown above. Run it from the repository root. Use a fresh database: the DDL drops existing project tables, and the dimension/fact load scripts are not designed for repeated incremental loads.
 
 ---
 
@@ -228,37 +248,39 @@ Run the SQL in this order (from `psql`, connected to `finance_analytics`):
 
 ```bash
 # Schema
-psql -d finance_analytics -f sql/01_ddl/01_staging_tables.sql
-psql -d finance_analytics -f sql/01_ddl/02_star_schema.sql
+psql -v ON_ERROR_STOP=1 -d finance_analytics -f sql/01_ddl/01_staging_tables.sql
+psql -v ON_ERROR_STOP=1 -d finance_analytics -f sql/01_ddl/02_star_schema.sql
 
 # Load raw CSVs into staging (adjust paths if needed)
-psql -d finance_analytics -c "\copy stg_users FROM 'data/raw/users_data.csv' WITH (FORMAT csv, HEADER true);"
-psql -d finance_analytics -c "\copy stg_cards FROM 'data/raw/cards_data.csv' WITH (FORMAT csv, HEADER true);"
-psql -d finance_analytics -c "\copy stg_transactions FROM 'data/raw/transactions_data.csv' WITH (FORMAT csv, HEADER true);"
+psql -v ON_ERROR_STOP=1 -d finance_analytics -c "\copy stg_users FROM 'data/raw/users_data.csv' WITH (FORMAT csv, HEADER true);"
+psql -v ON_ERROR_STOP=1 -d finance_analytics -c "\copy stg_cards FROM 'data/raw/cards_data.csv' WITH (FORMAT csv, HEADER true);"
+psql -v ON_ERROR_STOP=1 -d finance_analytics -c "\copy stg_transactions FROM 'data/raw/transactions_data.csv' WITH (FORMAT csv, HEADER true);"
 
 # Load MCC reference data
 python scripts/load_mcc.py
 
 # Clean currency fields (staging TEXT -> NUMERIC views)
-psql -d finance_analytics -f sql/02_cleaning/01_clean_currency_fields.sql
+psql -v ON_ERROR_STOP=1 -d finance_analytics -f sql/02_cleaning/01_clean_currency_fields.sql
 
 # Populate the star schema
-psql -d finance_analytics -f sql/03_load/01_load_dimensions.sql
-psql -d finance_analytics -f sql/03_load/02_load_transactions.sql
+psql -v ON_ERROR_STOP=1 -d finance_analytics -f sql/03_load/01_load_dimensions.sql
+psql -v ON_ERROR_STOP=1 -d finance_analytics -f sql/03_load/02_load_transactions.sql
 
 # Indexes, views, functions, procedures, triggers, security
-psql -d finance_analytics -f sql/04_indexes/01_indexes.sql
-psql -d finance_analytics -f sql/04_indexes/02_fact_indexes.sql
-psql -d finance_analytics -f sql/05_views/01_transaction_views.sql
-psql -d finance_analytics -f sql/05_views/02_kpi_views.sql
-psql -d finance_analytics -f sql/06_functions/01_financial_functions.sql
-psql -d finance_analytics -f sql/07_procedures/01_procedures.sql
-psql -d finance_analytics -f sql/08_triggers/01_triggers.sql
-psql -d finance_analytics -f sql/10_security/01_roles.sql
-psql -d finance_analytics -f sql/11_dashboard_views/01_dashboard_views.sql
+psql -v ON_ERROR_STOP=1 -d finance_analytics -f sql/04_indexes/01_indexes.sql
+psql -v ON_ERROR_STOP=1 -d finance_analytics -f sql/04_indexes/02_fact_indexes.sql
+psql -v ON_ERROR_STOP=1 -d finance_analytics -f sql/05_views/01_transaction_views.sql
+psql -v ON_ERROR_STOP=1 -d finance_analytics -f sql/05_views/02_kpi_views.sql
+psql -v ON_ERROR_STOP=1 -d finance_analytics -f sql/06_functions/01_financial_functions.sql
+psql -v ON_ERROR_STOP=1 -d finance_analytics -f sql/07_procedures/01_procedures.sql
+psql -v ON_ERROR_STOP=1 -d finance_analytics -f sql/08_triggers/01_triggers.sql
+psql -v ON_ERROR_STOP=1 -d finance_analytics -f sql/10_security/01_roles.sql
+psql -v ON_ERROR_STOP=1 -d finance_analytics -f sql/11_dashboard_views/01_dashboard_views.sql
 
-# Validate the load
-psql -d finance_analytics -f sql/09_testing/01_table_tests.sql
+# Validate the load (inspect returned counts and results)
+psql -v ON_ERROR_STOP=1 -d finance_analytics -f sql/09_testing/01_table_tests.sql
+psql -v ON_ERROR_STOP=1 -d finance_analytics -f sql/09_testing/02_view_tests.sql
+psql -v ON_ERROR_STOP=1 -d finance_analytics -f sql/09_testing/03_function_tests.sql
 ```
 
 Then explore `sql/10_business_analytics/` for the business-analytics query library.
@@ -286,7 +308,7 @@ Then explore `sql/10_business_analytics/` for the business-analytics query libra
 ## 14. Power BI Setup
 
 1. Complete the SQL setup in §12 first.
-2. Open `dashboard/Personal_Finance_Analytics.pbix` in Power BI Desktop.
+2. Obtain `Personal_Finance_Analytics.pbix` separately and open it in Power BI Desktop. The 317 MB file is excluded from Git and is not included in this repository; no download link is currently published. You can review the screenshots and dashboard documentation without it, or build a report from the SQL views.
 3. Update the PostgreSQL data-source connection (host/port/database/credentials) if they differ from your local defaults.
 4. Refresh the model.
 
@@ -352,6 +374,16 @@ A full pre-publish audit of this repository — folder structure, GitHub present
 
 - Source data: a synthetic credit-card transaction dataset (users, cards, transactions, MCC reference data) sourced from Kaggle — see [`docs/03_Dataset_Description.md`](docs/03_Dataset_Description.md) for its documented scope and limitations.
 - Built as a self-directed portfolio project; the scope-pivot decision in [`docs/00_PRD_Scope_Addendum.md`](docs/00_PRD_Scope_Addendum.md) was made unprompted upon discovering the dataset/PRD mismatch.
+
+---
+
+## Author
+
+**Sunil Kumar**
+
+ [LinkedIn](https://www.linkedin.com/in/sunil-kumar0001/) | [Kaggle](https://www.kaggle.com/sunil123kumar)
+
+Project: [Personal Finance Analytics](https://github.com/sunilsaini01/personal-finance-analytics)
 
 ---
 
